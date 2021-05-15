@@ -1,0 +1,45 @@
+version: '3.6'
+services:
+  token:
+    build:
+      context: ./
+    image: lanerunner/dev/api-gw-service-mesh-token
+    container_name: jwt-auth-gw
+    ports:
+      - 8099:8080
+    volumes: 
+      - ./storage/logs/access.log:/usr/local/openresty/nginx/logs/access.log
+      - ./storage/logs/error.log:/usr/local/openresty/nginx/logs/error.log
+    env_file: .env
+    depends_on:
+      - test_keycloak_service
+      - test_keycloak_db
+      - test_service
+    
+  test_keycloak_db:
+    image: postgres:10-alpine
+    container_name: test-idp-db
+    volumes:
+      - db_dat:/var/lib/postgresql/data
+    env_file: .env
+        
+  test_keycloak_service:
+    image: jboss/keycloak:4.1.0.Final
+    container_name: test-idp-srv
+    ports:
+        - 8098:8080
+    env_file: .env
+    depends_on:
+      - test_keycloak_db
+
+
+  test_service:
+    image: nginxdemos/hello
+    container_name: test-app
+    volumes:
+      - ./tests/scripts/test.conf:/etc/nginx/nginx.conf
+    ports:
+        - 8097:80
+
+volumes:
+    db_dat: {}
