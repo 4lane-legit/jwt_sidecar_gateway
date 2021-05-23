@@ -1,0 +1,142 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  labels:
+    k8s-app: hello-app
+  name: hello-app
+  namespace: default
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      k8s-app: hello-app
+  template:
+    metadata:
+      labels:
+        k8s-app: hello-app
+    spec:
+      containers:
+      - name: hello-app
+        imagePullPolicy: "IfNotPresent"
+        image: nginxdemos/hello
+        ports:
+        - containerPort: 80
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            scheme: HTTP
+            path: /
+            port: 80
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+
+      - name: auth-gw
+        image: l27.0.0.1:5000/lanerunner/api-gw-service-mesh-token:0.0.1
+        imagePullPolicy: "IfNotPresent"
+        env:
+        - name: SSO_ISSUER
+          value: idp-app:8080
+        - name: SERVER_NAME
+          value: lanerunner.auth-token-gw
+        - name: SERVER_PORT
+          value: "8080"
+        - name: HTTP_RESOLVER
+          value: "8.8.8.8"
+        - name: SSO_REDIRECT_URL
+          value: "http://12.0.0.0.1"
+        - name: SSO_ERROR_REPORTING
+          value: "warn"
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            scheme: HTTP
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30 
+          timeoutSeconds: 30
+      serviceAccountName: hello-app
+
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  labels:
+    k8s-app: idp-app
+  name: idp-app
+  namespace: default
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      k8s-app: idp-app
+  template:
+    metadata: 
+      labels:
+        k8s-app: idp-app
+    spec:
+      containers:
+      - name: idp-app
+        image: jboss/keycloak:4.1.0.Final
+        env:
+        - name: KEYCLOAK_USER
+          value: admin
+        - name: KEYCLOAK_PASSWORD
+          value: testing
+        - name: PROXY_ADDRESS_FORWARDING
+          value: "true"
+        - name: DB_VENDOR
+          value: POSTGRES
+        - name: DB_ADDR
+          value: idp-db
+        - name: DB_USER
+          value: keycloak
+        - name: DB_DATABASE
+          value: keycloak
+        - name: DB_PASSWORD
+          value: password
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: idp-db
+  labels:
+    k8s-app: idp-db
+  namespace: default
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      k8s-app: idp-db
+  template:
+    metadata:
+      labels:
+        k8s-app: idp-db
+    spec:
+      containers:
+        - name: idp-db
+          image: postgres:10.4
+          imagePullPolicy: "IfNotPresent"
+          env:
+          - name: POSTGRES_DB
+            value: keycloak
+          - name: POSTGRES_USER
+            value: keycloak
+          - name: POSTGRES_PASSWORD
+            value: password
+          ports:
+          volumeMounts:
+            - mountPath: /var/lib/postgresql/data
+              name: postgredb
+      volumes:
+        - name: postgredb 
+          persistentVolumeClaim:
+            claimName: postgres-pv-claim
+

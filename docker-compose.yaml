@@ -3,7 +3,7 @@ services:
   token:
     build:
       context: ./
-    image: lanerunner/dev/api-gw-service-mesh-token
+    image: 4lane/api-gw
     container_name: jwt-auth-gw
     ports:
       - 8099:8080
