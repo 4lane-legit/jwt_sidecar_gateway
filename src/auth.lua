@@ -98,7 +98,86 @@ if ngx.req.get_method() ~= "OPTIONS" then
     end
 
     -- Add support for roles
+     local placeholders = {}
+    for key, value in pairs(payload) do
+        if type(value) ~= "table" then
+            placeholders["jwt." .. key] = value
+        end
+    end
 
+    local roles = payload["access"]["roles"]
+    ngx.log(ngx.WARN, "User roles: " .. inspect(roles))
+
+--     this can be replaced with the logic where we get the AUTHZ CONFIG from REDIS instead.
+    if not authz_config then
+        ngx.log(ngx.WARN,"Authorization config is not defined")
+        ngx.log(ngx.WARN, "Token: " .. token)
+        ngx.exit(ngx.HTTP_UNAUTHORIZED)
+    end
+
+    local authorization_rules = json.decode(authz_config)
+    local matched = false
+
+    for _, rule_value in ipairs(authorization_rules) do
+        if matched then
+            break
+        end
+
+        local role_matched = false
+        if rule_value["role"] then
+            for _, value in ipairs(roles) do
+                ngx.log(ngx.WARN, "Checking role: " .. value .. " against: " .. rule_value["role"])
+                if value ==  rule_value["role"] then
+                    role_matched = true
+                    break
+                end
+            end
+        end
+
+        if not rule_value["role"] or role_matched then
+            for _, permission_value in ipairs(rule_value["permissions"]) do
+                local permission_url = permission_value["url"]
+                local url = string.gsub(permission_url, "%${(.-)}", function(w) return placeholders[w] end)
+                local pattern = globtopattern(url)
+                local result = string.match(current_url, pattern)
+
+                if result == current_url then
+                    matched = true
+                    if permission_value["deny"] then
+                        ngx.log(ngx.WARN, "Authorization failed: Permission denied")
+                        ngx.log(ngx.WARN, "Token: " .. token)
+                        ngx.exit(ngx.HTTP_FORBIDDEN)
+                    end
+
+                    if permission_value["method"] then
+                        local method_matched = false
+                        for method_key, method_value in pairs(permission_value["method"]) do
+                            if method_value == ngx.var.request_method then
+                                method_matched = true
+                                break
+                            end
+                        end
+
+                        if not method_matched then
+                            ngx.log(ngx.WARN, "Authorization failed: Verb not allowed")
+                            ngx.log(ngx.WARN, "Token: " .. token)
+                            ngx.exit(ngx.HTTP_FORBIDDEN)
+                        end
+                    end
+                    break
+                end
+            end
+        end
+    end
+
+    if matched == false then
+        ngx.log(ngx.WARN, "Authorization failed: No permission rule matched the request")
+        ngx.log(ngx.WARN, "Token: " .. token)
+        ngx.exit(ngx.HTTP_FORBIDDEN)
+    end
+
+    ngx.req.set_header("X-Auth-Tenant", payload["instance"])
+    ngx.req.set_header("X-Auth-Role", payload["role"])
 
 end
 
